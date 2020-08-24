@@ -1,49 +1,95 @@
 version: '3'
+captainVersion: 4
 services:
   base: &base
     image: chatwoot/chatwoot:latest
     env_file: .env ## Change this file for customized env variables
 
-  rails:
-    <<: *base
-    depends_on:
-      - postgres
-      - redis
-    ports:
-      - 3000:3000
-    environment:
-      - NODE_ENV=production
-      - RAILS_ENV=production
-    entrypoint: docker/entrypoints/rails.sh
-    command: ['rails', 's', '-p', '3000', '-b', '0.0.0.0']
-
-  sidekiq:
-    <<: *base
-    depends_on:
-      - postgres
-      - redis
-    environment:
-      - NODE_ENV=production
-      - RAILS_ENV=production
-    command: ['sidekiq', '-C', 'config/sidekiq.yml']
-
-  postgres:
+  $$cap_appname-postgres:
     image: postgres:12
-    restart: always
-    ports:
-      - '5432:5432'
     volumes:
-      - /data/postgres:/var/lib/postgresql/data
+      - $$cap_appname-postgres-data:/var/lib/postgresql/data
+    restart: always
     environment:
-      - POSTGRES_DB=chatwoot
-      - POSTGRES_USER=postgres
-      # Please provide your own password.
-      - POSTGRES_PASSWORD=
-
-  redis:
-    image: redis:alpine
-    restart: always
+      POSTGRES_USER: chatwoot
+      POSTGRES_PASSWORD: $$cap_chatwoot_postgres_password
+      POSTGRES_DB: chatwoot
+    caproverExtra:
+      notExposeAsWebApp: 'true'
+  $$cap_appname-redis:
     volumes:
-      - /data/redis:/data
-    ports:
-      - '6379:6379'
+      - $$cap_appname-redis-data:/data
+    restart: always
+    environment:
+      REDIS_PASSWORD: $$cap_chatwoot_redis_password
+    caproverExtra:
+      dockerfileLines:
+        - FROM redis:alpine
+        - CMD exec redis-server --requirepass "$$cap_chatwoot_redis_password"
+      notExposeAsWebApp: 'true'
+  $$cap_appname-web:
+    restart: always
+    environment:
+      RAIL_ENV: production
+      RAILS_LOG_TO_STDOUT: 'true'
+      SECRET_KEY_BASE: $$cap_chatwoot_secret_key_base
+      POSTGRES_HOST: srv-captain--$$cap_appname-postgres
+      POSTGRES_DATABASE: chatwoot
+      POSTGRES_USERNAME: chatwoot
+      POSTGRES_PASSWORD: $$cap_chatwoot_postgres_password
+      REDIS_URL: redis://srv-captain--$$cap_appname-redis:6379
+      REDIS_PASSWORD: $$cap_chatwoot_redis_password
+    caproverExtra:
+      containerHttpPort: '3000'
+      dockerfileLines:
+        - FROM chatwoot/chatwoot:$$cap_chatwoot_version
+        - RUN chmod +x docker/entrypoints/rails.sh
+        - ENTRYPOINT ["docker/entrypoints/rails.sh"]
+        - EXPOSE 3000
+        - CMD bundle exec rails db:prepare; bundle exec rails s -b 0.0.0.0 -p 3000
+  $$cap_appname-worker:
+    restart: always
+    environment:
+      RAIL_ENV: production
+      RAILS_LOG_TO_STDOUT: 'true'
+      SECRET_KEY_BASE: $$cap_chatwoot_secret_key_base
+      POSTGRES_HOST: srv-captain--$$cap_appname-postgres
+      POSTGRES_DATABASE: chatwoot
+      POSTGRES_USERNAME: chatwoot
+      POSTGRES_PASSWORD: $$cap_chatwoot_postgres_password
+      REDIS_URL: redis://srv-captain--$$cap_appname-redis:6379
+      REDIS_PASSWORD: $$cap_chatwoot_redis_password
+    caproverExtra:
+      dockerfileLines:
+        - FROM chatwoot/chatwoot:$$cap_chatwoot_version
+        - RUN chmod +x docker/entrypoints/rails.sh
+        - ENTRYPOINT ["docker/entrypoints/rails.sh"]
+        - CMD bundle exec sidekiq -C config/sidekiq.yml
+      notExposeAsWebApp: 'true'
+caproverOneClickApp:
+  variables:
+    - id: $$cap_chatwoot_version
+      label: Chatwoot Version Tag
+      description: https://hub.docker.com/r/chatwoot/chatwoot/tags
+      defaultValue: v1.6.3
+    - id: $$cap_chatwoot_secret_key_base
+      label: Chatwoot Secret Key Base
+      description: The randomized string which is used to verify the integrity of signed cookies. Please use a string with more than 26 characters
+      validRegex: /^[^\@]{26,}$/
+    - id: $$cap_chatwoot_postgres_password
+      label: Postgres Password
+      description: Password must be at least 12 characters.  Please use a random string.
+      validRegex: /^[^\@]{12,}$/
+    - id: $$cap_chatwoot_redis_password
+      label: Redis Password
+      description: Password must be at least 12 characters. Please use a random string.
+      validRegex: /^[^\@]{12,}$/
+  instructions:
+    start: Open-source customer support saas alternative to Intercom, Drift, Crisp.
+    end: >-
+      Your Chatwoot instance is now successfully deployed. You can create a new account using signup option.
+       Refer https://www.chatwoot.com/docs/environment-variables/ for full list of environment variables available. Let us know if you have any queries through hello@chatwoot.com
+  displayName: Chatwoot
+  isOfficial: true
+  description: Open-source customer support saas alternative to Intercom, Drift, Crisp
+  documentation: 'Read more at: https://www.chatwoot.com/docs'
